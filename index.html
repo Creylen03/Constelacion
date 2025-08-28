@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Constelación del amor ✨</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="overlay">
+    <h1 class="title">Constelación del amor ✨</h1>
+    <p class="subtitle">Toca la pantalla para crear estrellas — observa cómo se forma un mensaje...</p>
+  </div>
+
+  <canvas id="bgCanvas"></canvas>     <!-- estrellas de fondo -->
+  <canvas id="mainCanvas"></canvas>   <!-- estrellas interactivas + líneas + mensaje -->
+
+<script>
+/* ---------- Config / Canvas setup ---------- */
+const bgCanvas = document.getElementById('bgCanvas');
+const mainCanvas = document.getElementById('mainCanvas');
+const dpr = window.devicePixelRatio || 1;
+
+function resize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  [bgCanvas, mainCanvas].forEach(c => {
+    c.width = Math.floor(w * dpr);
+    c.height = Math.floor(h * dpr);
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------- Background stars (twinkling) ---------- */
+const bgCtx = bgCanvas.getContext('2d');
+const BG_COUNT = Math.floor((window.innerWidth * window.innerHeight) / 7000); // ajusta densidad
+let bgStars = [];
+
+function initBGStars() {
+  bgStars = [];
+  for (let i = 0; i < BG_COUNT; i++) {
+    bgStars.push({
+      x: Math.random() * innerWidth,
+      y: Math.random() * innerHeight,
+      r: Math.random() * 1.6 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      speed: Math.random() * 0.02 + 0.005
+    });
+  }
+}
+initBGStars();
+
+function drawBG(dt) {
+  bgCtx.clearRect(0,0,innerWidth,innerHeight);
+  for (let s of bgStars) {
+    s.phase += s.speed * dt;
+    const alpha = 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(s.phase));
+    bgCtx.beginPath();
+    bgCtx.fillStyle = `rgba(255,255,255,${alpha*0.6})`;
+    bgCtx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+    bgCtx.fill();
+  }
+}
+
+/* ---------- Message points (hidden message) ---------- */
+const mainCtx = mainCanvas.getContext('2d');
+let messagePoints = []; // {x,y,alpha}
+const MESSAGE = "TE AMO"; // Puedes cambiar el mensaje
+function generateMessagePoints() {
+  // dibujamos el texto en un offscreen canvas y muestreamos pixeles
+  const off = document.createElement('canvas');
+  const ow = Math.min(window.innerWidth * 0.9, 900);
+  const oh = 200;
+  off.width = ow;
+  off.height = oh;
+  const oc = off.getContext('2d');
+  oc.fillStyle = 'white';
+  // Ajuste de tamaño de fuente según ancho
+  const fontSize = Math.floor(ow / (MESSAGE.length * 0.6));
+  oc.font = `bold ${fontSize}px serif`;
+  oc.textAlign = 'center';
+  oc.textBaseline = 'middle';
+  oc.clearRect(0,0,ow,oh);
+  oc.fillText(MESSAGE, ow/2, oh/2 + 10);
+  // sample pixels
+  messagePoints = [];
+  const sampleStep = Math.max(4, Math.floor(fontSize / 6)); // densidad
+  const img = oc.getImageData(0,0,ow,oh).data;
+  for (let y = 0; y < oh; y += sampleStep) {
+    for (let x = 0; x < ow; x += sampleStep) {
+      const idx = (y * ow + x) * 4;
+      const a = img[idx + 3];
+      if (a > 40) {
+        // map point to screen center
+        const sx = (innerWidth - ow)/2 + x;
+        const sy = (innerHeight / 2 - oh/2) + y;
+        messagePoints.push({x: sx, y: sy, alpha: 0});
+      }
+    }
+  }
+}
+generateMessagePoints();
+window.addEventListener('resize', generateMessagePoints);
+
+/* ---------- Interactive stars (created on touch/click) ---------- */
+let stars = []; // {x,y,r,life}
+const MAX_STARS = 500;
+function addStar(x,y) {
+  if (stars.length > MAX_STARS) stars.shift();
+  stars.push({x, y, r: Math.random()*2 + 2.5, life: 15000, born: performance.now()});
+}
+
+/* ---------- Connect stars: draw lines between close stars ---------- */
+function drawStarsAndLines(now) {
+  mainCtx.clearRect(0,0,innerWidth,innerHeight);
+
+  // 1) Draw message points (dim, reveal with alpha)
+  for (let p of messagePoints) {
+    if (p.alpha > 0.005) {
+      mainCtx.beginPath();
+      mainCtx.fillStyle = `rgba(255,210,230,${Math.min(p.alpha,0.9)})`;
+      mainCtx.arc(p.x, p.y, 1.7, 0, Math.PI*2);
+      mainCtx.fill();
+    }
+  }
+
+  // 2) Draw lines between interactive stars
+  const threshold = 140; // distancia para conectar
+  for (let i=0; i<stars.length; i++) {
+    for (let j=i+1; j<stars.length; j++) {
+      const a = stars[i];
+      const b = stars[j];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.hypot(dx,dy);
+      if (dist < threshold) {
+        const alpha = 0.35 * (1 - dist/threshold);
+        mainCtx.beginPath();
+        mainCtx.strokeStyle = `rgba(200,230,255,${alpha})`;
+        mainCtx.lineWidth = 0.9;
+        mainCtx.moveTo(a.x, a.y);
+        mainCtx.lineTo(b.x, b.y);
+        mainCtx.stroke();
+      }
+    }
+  }
+
+  // 3) Draw interactive stars and also use them to reveal message
+  for (let s of stars) {
+    const age = now - s.born;
+    const lifeRatio = Math.max(0, 1 - age / s.life);
+    const size = s.r * (1 + (1 - lifeRatio) * 0.8);
+    mainCtx.beginPath();
+    mainCtx.fillStyle = `rgba(255,255,255,${0.95 * lifeRatio})`;
+    mainCtx.arc(s.x, s.y, size, 0, Math.PI*2);
+    mainCtx.fill();
+
+    // reveal message points near this star
+    for (let p of messagePoints) {
+      const dx = p.x - s.x;
+      const dy = p.y - s.y;
+      const d = Math.hypot(dx,dy);
+      if (d < 40) {
+        p.alpha = Math.min(1, p.alpha + 0.03); // aumentar alpha gradualmente
+      } else if (d < 80) {
+        p.alpha = Math.min(1, p.alpha + 0.01);
+      }
+    }
+  }
+}
+
+/* ---------- Background automatic small stars that slowly move (optional) ---------- */
+let last = performance.now();
+function loop(now) {
+  const dt = now - last;
+  last = now;
+  drawBG(dt / 16);      // pass relative dt
+  drawStarsAndLines(now);
+  // update stars: fade and remove after life
+  stars = stars.filter(s => (now - s.born) < s.life);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ---------- Input: click + multitouch ---------- */
+function handlePointer(x, y) {
+  // clamp inside viewport
+  x = Math.max(0, Math.min(innerWidth, x));
+  y = Math.max(0, Math.min(innerHeight, y));
+  addStar(x, y);
+}
+// click
+document.addEventListener('click', (e) => {
+  handlePointer(e.clientX, e.clientY);
+});
+// multitouch
+document.addEventListener('touchstart', (e) => {
+  for (let i=0; i<e.touches.length; i++) {
+    const t = e.touches[i];
+    handlePointer(t.clientX, t.clientY);
+  }
+}, {passive:true});
+
+/* ---------- Pequeño "auto-seed" para que al entrar haya 1-2 estrellas iniciales ---------- */
+setTimeout(() => {
+  addStar(innerWidth*0.45, innerHeight*0.45);
+  setTimeout(()=> addStar(innerWidth*0.55, innerHeight*0.55), 400);
+}, 700);
+
+/* ---------- Optional: click-and-drag create multiple while moving ---------- */
+let dragging = false;
+document.addEventListener('pointerdown', (e) => { dragging = true; });
+document.addEventListener('pointerup', () => { dragging = false; });
+document.addEventListener('pointermove', (e) => {
+  if (dragging) handlePointer(e.clientX, e.clientY);
+});
+</script>
+</body>
+</html>
